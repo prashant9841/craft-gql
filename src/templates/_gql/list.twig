@@ -1,0 +1,15 @@
+{# One fragment per entry type in the section; field lines come from gql-fields #}
+# Omit $limit to get all items
+query MyQuery($limit: Int) {
+    entries(section: "{{entry.section.handle}}", limit: $limit) {
+{% for entryType in entry.section.getEntryTypes() %}
+{% set fields = entryType.getFieldLayout().customFields %}
+        ... on {{entryType.handle}}_Entry {
+            id
+            title
+            dateCreated
+            {{ include('gqldocs/_gql/fields')|replace('/<!--.*?-->/s', '')|trim|raw }}
+        }
+{% endfor %}
+    }
+}

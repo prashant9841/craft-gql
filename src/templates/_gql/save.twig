@@ -1,0 +1,27 @@
+{#
+	Save mutation, derived from each field's GraphQL mutation argument type.
+	Defaults to this entry's create/update; a caller may pass `mutationName`, `baseArgs`
+	and `hint` for a nested (Matrix block) entry.
+#}
+{%- set mutationName = mutationName ?? ('save_' ~ entry.section.handle ~ '_' ~ entry.type.handle ~ '_Entry') -%}
+{%- set args = baseArgs ?? [['id', 'ID'], ['title', 'String']] -%}
+{%- set hint = hint ?? 'Omit $id to create, pass it to update' -%}
+{%- for field in fields -%}
+	{%- set argType = field.contentGqlMutationArgumentType -%}
+	{%- set args = args|merge([[field.handle, argType is iterable ? argType.type : argType]]) -%}
+{%- endfor %}
+# {{ hint }}
+mutation SaveEntry(
+{% for arg in args %}
+    ${{ arg[0] }}: {{ arg[1] }}
+{% endfor %}
+) {
+    {{ mutationName }}(
+{% for arg in args %}
+        {{ arg[0] }}: ${{ arg[0] }}
+{% endfor %}
+    ) {
+        id
+        title
+    }
+}

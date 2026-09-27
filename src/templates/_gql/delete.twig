@@ -1,0 +1,4 @@
+{# `deleteId` defaults to this entry #}
+mutation DeleteEntry {
+    deleteEntry(id: {{ deleteId ?? entry.id }})
+}

@@ -1,0 +1,217 @@
+{% extends '_layouts/cp' %}
+{% import '_includes/forms' as forms %}
+{% set title = 'GQL Docs' %}
+{% set selectedSubnavItem = 'gqldocs' %}
+
+{% if generate %}
+	{% set tabs = {
+		'gqldocs-queries': {label: 'GraphQL', url: '#gqldocs-queries'},
+		'gqldocs-fields': {label: 'Fields', url: '#gqldocs-fields'},
+		'gqldocs-raw': {label: 'Raw GQL', url: '#gqldocs-raw'},
+		'gqldocs-json': {label: 'Field JSON', url: '#gqldocs-json'},
+	} %}
+{% endif %}
+
+{% css %}
+	.gqldocs-form { margin-bottom: 1.5rem; }
+	.gqldocs-code { background: var(--gray-050); padding: 1rem; border-radius: var(--small-border-radius); overflow-x: auto; font-family: var(--code-font); font-size: 0.8125rem; white-space: pre; }
+	.gqldocs-raw { white-space: pre-wrap; word-break: break-all; }
+	.gqldocs-op + .gqldocs-op { margin-top: 1.5rem; }
+	.gqldocs-nested td:first-child { padding-left: 2rem; }
+	.gqldocs-picker { list-style: none; margin: 0 0 0.25rem; padding: 0; }
+	.gqldocs-picker .gqldocs-picker { margin-left: 1.75rem; }
+	.gqldocs-picker li { margin: 0.25rem 0; }
+	.gqldocs-picker-type { margin: 0.5rem 0 0 1.75rem; }
+	.gqldocs-copy-wrap { position: relative; }
+	.gqldocs-copy-wrap > .gqldocs-copy { position: absolute; top: 0.5rem; right: 0.5rem; }
+	.gqldocs-copy-wrap > .gqldocs-code { padding-right: 5rem; }
+	.gqldocs-toggle { display: inline-block; width: 2ch; margin-left: -2ch; cursor: pointer; user-select: none; color: var(--link-color); }
+	.gqldocs-toggle::before { content: '−'; }
+	.gqldocs-frag.is-collapsed > .gqldocs-toggle::before { content: '✚'; }
+	.gqldocs-frag > .gqldocs-ellipsis { display: none; }
+	.gqldocs-frag.is-collapsed > .gqldocs-ellipsis { display: inline; }
+	.gqldocs-frag.is-collapsed > .gqldocs-body { display: none; }
+{% endcss %}
+
+{# Collapsible `... on X_Entry {` fragments in the query blocks, collapsed by default #}
+{% js %}
+	document.querySelectorAll('#gqldocs-queries pre code').forEach(code => {
+		const root = document.createDocumentFragment();
+		const stack = [{indent: null, el: root}];
+		code.textContent.split('\n').forEach((line, i) => {
+			const top = stack[stack.length - 1];
+			const nl = i ? '\n' : '';
+			const opener = line.match(/^(\s*)(\.\.\. on \S+ \{)$/);
+			if (opener) {
+				const frag = document.createElement('span');
+				frag.className = 'gqldocs-frag is-collapsed';
+				const toggle = document.createElement('span');
+				toggle.className = 'gqldocs-toggle';
+				const ellipsis = document.createElement('span');
+				ellipsis.className = 'gqldocs-ellipsis';
+				ellipsis.textContent = '…}';
+				const body = document.createElement('span');
+				body.className = 'gqldocs-body';
+				frag.append(opener[1], toggle, opener[2], ellipsis, body);
+				top.el.append(nl, frag);
+				stack.push({indent: opener[1], el: body});
+			} else if (top.indent !== null && line === top.indent + '}') {
+				top.el.append(nl + line);
+				stack.pop();
+			} else {
+				top.el.append(nl + line);
+			}
+		});
+		code.textContent = '';
+		code.append(root);
+	});
+	document.querySelectorAll('.gqldocs-copy').forEach(btn => btn.addEventListener('click', () => {
+		navigator.clipboard.writeText(btn.dataset.copy).then(() => Craft.cp.displayNotice('Copied'));
+	}));
+	document.getElementById('gqldocs-queries')?.addEventListener('click', e => {
+		if (e.target.classList.contains('gqldocs-toggle')) {
+			e.target.parentElement.classList.toggle('is-collapsed');
+		}
+	});
+{% endjs %}
+
+{# Code block with a copy button; `text` is what gets copied #}
+{% macro codeBlock(text, class) %}
+	<div class="gqldocs-copy-wrap">
+		<button type="button" class="btn small gqldocs-copy" data-copy="{{ text }}">Copy</button>
+		<pre class="gqldocs-code {{ class ?? '' }}"><code>{{ text }}</code></pre>
+	</div>
+{% endmacro %}
+
+{# Compact field rows; Matrix block types nest underneath their field #}
+{% macro fieldRows(fields, depth) %}
+	{% for field in fields %}
+		<tr class="{{ depth ? 'gqldocs-nested' }}">
+			<td>{{ field.label }}</td>
+			<td><code>{{ field.handle }}</code></td>
+			<td class="light">{{ field.type }}</td>
+			<td><code>{{ field.gqlType }}</code></td>
+			<td>{{ field.required ? 'Yes' }}</td>
+		</tr>
+		{% for blockType in field.blockTypes ?? [] %}
+			<tr class="gqldocs-nested">
+				<td colspan="5"><strong>↳ {{ blockType.name }}</strong> <code>{{ blockType.handle }}</code></td>
+			</tr>
+			{{ _self.fieldRows(blockType.fields, depth + 1) }}
+		{% endfor %}
+	{% endfor %}
+{% endmacro %}
+
+{# Field checkboxes; a Matrix field's entry types and their fields show once it's checked #}
+{% macro fieldPicker(fields, prefix, paths) %}
+	<ul class="gqldocs-picker">
+		{% for field in fields %}
+			{% set path = prefix ~ field.handle %}
+			<li>
+				<label>
+					<input type="checkbox" name="fields[]" value="{{ path }}" {{ path in paths ? 'checked' }}>
+					{{ field.name }} <code>{{ field.handle }}</code> <span class="light">{{ field.displayName() }}</span>
+				</label>
+				{% if field is instance of('craft\\fields\\Matrix') %}
+					<div class="gqldocs-picker-children">
+						{% for entryType in field.getEntryTypes() %}
+							<div class="gqldocs-picker-type"><strong>↳ {{ entryType.name }}</strong> <code>{{ entryType.handle }}</code></div>
+							{{ _self.fieldPicker(entryType.getFieldLayout().customFields, path ~ '.' ~ entryType.handle ~ '.', paths) }}
+						{% endfor %}
+					</div>
+				{% endif %}
+			</li>
+		{% endfor %}
+	</ul>
+{% endmacro %}
+
+{% block content %}
+	{% if not entry %}
+		<form method="get" class="flex gqldocs-form">
+			{{ forms.text({
+				name: 'entryId',
+				value: entryId,
+				placeholder: 'Entry ID',
+				type: 'number',
+				size: 12,
+			}) }}
+			<button type="submit" class="btn submit">Next</button>
+		</form>
+		{% if entryId %}
+			<p class="error">No entry with ID {{ entryId }}.</p>
+		{% endif %}
+	{% else %}
+		<p class="light">
+			{{ entry.title }} · section <code>{{ schema.section }}</code> · type <code>{{ schema.handle }}</code>
+			· <a href="{{ siteUrl('gqlraw/' ~ entry.id) }}" target="_blank">/gqlraw/{{ entry.id }}</a>
+			· <a href="{{ siteUrl('gqlraw/' ~ entry.id ~ '/fields') }}" target="_blank">/gqlraw/{{ entry.id }}/fields</a>
+			· <a href="{{ cpUrl('gqldocs') }}">Change entry</a>
+			{% if generate %}
+				· <a href="{{ cpUrl('gqldocs', {entryId: entry.id, fields: paths}) }}">Change fields</a>
+			{% endif %}
+		</p>
+	{% endif %}
+
+	{% if entry and not generate %}
+		<form method="get" class="gqldocs-form" id="gqldocs-picker">
+			<input type="hidden" name="entryId" value="{{ entry.id }}">
+			<input type="hidden" name="generate" value="1">
+			{{ _self.fieldPicker(entry.getFieldLayout().customFields, '', paths) }}
+			<button type="submit" class="btn submit">Generate</button>
+		</form>
+		{% js %}
+			// Show a Matrix field's children only while it's checked; hidden ones are disabled so they don't submit
+			(() => {
+				const form = document.getElementById('gqldocs-picker');
+				const sync = () => form.querySelectorAll('.gqldocs-picker-children').forEach(children => {
+					const on = children.parentElement.querySelector(':scope > label > input').checked
+						&& !children.parentElement.closest('.gqldocs-picker-children.hidden');
+					children.classList.toggle('hidden', !on);
+					children.querySelectorAll(':scope > .gqldocs-picker > li > label > input').forEach(input => input.disabled = !on);
+				});
+				form.addEventListener('change', sync);
+				sync();
+			})();
+		{% endjs %}
+	{% elseif generate %}
+
+		<div id="gqldocs-queries">
+			{% for op in operations %}
+				<div class="gqldocs-op">
+					<h2>{{ op.title }}</h2>
+					{{ _self.codeBlock(op.code) }}
+				</div>
+			{% endfor %}
+		</div>
+
+		<div id="gqldocs-fields" class="hidden">
+			<table class="data fullwidth">
+				<thead>
+					<tr>
+						<th>Label</th>
+						<th>Handle</th>
+						<th>Type</th>
+						<th>GQL input</th>
+						<th>Required</th>
+					</tr>
+				</thead>
+				<tbody>
+					{{ _self.fieldRows(schema.fields, 0) }}
+				</tbody>
+			</table>
+		</div>
+
+		<div id="gqldocs-raw" class="hidden">
+			{% for op in operations %}
+				<div class="gqldocs-op">
+					<h2>{{ op.title }}</h2>
+					{{ _self.codeBlock(op.raw, 'gqldocs-raw') }}
+				</div>
+			{% endfor %}
+		</div>
+
+		<div id="gqldocs-json" class="hidden">
+			{{ _self.codeBlock(schema|json_encode(constant('JSON_PRETTY_PRINT') b-or constant('JSON_UNESCAPED_SLASHES'))) }}
+		</div>
+	{% endif %}
+{% endblock %}

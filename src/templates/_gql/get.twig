@@ -1,0 +1,10 @@
+{# Field lines come from gql-fields; strip Template Comments' HTML comments from the include #}
+query MyQuery {
+    entry(id: {{entry.id}}) {
+        ... on {{entry.type.handle}}_Entry {
+            title
+            dateCreated
+            {{ include('gqldocs/_gql/fields')|replace('/<!--.*?-->/s', '')|trim|raw }}
+        }
+    }
+}

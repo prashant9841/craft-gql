@@ -1,0 +1,62 @@
+{#
+	GraphQL selection lines for `fields`, one per field, joined for `indent` (default 12 spaces).
+	Sub-selection derived from each field's own GraphQL type, so any field type works:
+	scalars/enums need none, unions get __typename, objects/interfaces get their
+	preferred leaf fields (id, title, html…) or else every leaf field.
+	Matrix fields get a fragment per entry type, recursing into this partial for any depth.
+	Callers strip Template Comments' HTML comments from this output.
+	`selected` (optional) is this level's selection tree: only its handles are kept, and
+	each Matrix field's sub-tree (keyed by entry type) is passed down.
+#}
+{%- set indent = indent ?? '            ' -%}
+{%- set selected = selected ?? null -%}
+{%- if selected is not null -%}
+	{%- set fields = fields|filter(f => selected[f.handle] is defined) -%}
+{%- endif -%}
+{%- set stripComments = '/<!--.*?-->/s' -%}
+{%- set lines = [] -%}
+{%- for field in fields -%}
+	{%- set sub = '' -%}
+	{%- if field is instance of('craft\\fields\\Matrix') -%}
+		{%- set sub = "{\n" ~ indent ~ "    __typename" -%}
+		{%- for entryType in field.getEntryTypes() -%}
+			{%- set nested = include('gqldocs/_gql/fields', {
+				fields: entryType.getFieldLayout().customFields,
+				indent: indent ~ '        ',
+				selected: selected is null ? null : (selected[field.handle][entryType.handle] ?? {}),
+			})|replace(stripComments, '')|trim -%}
+			{# GraphQL names the type after the original handle, ignoring this field's handle override #}
+			{%- set sub = sub
+				~ "\n" ~ indent ~ "    ... on " ~ (entryType.original ?? entryType).handle ~ "_Entry {"
+				~ "\n" ~ indent ~ "        id"
+				~ "\n" ~ indent ~ "        title"
+				~ (nested ? "\n" ~ indent ~ "        " ~ nested)
+				~ "\n" ~ indent ~ "    }" -%}
+		{%- endfor -%}
+		{%- set sub = sub ~ "\n" ~ indent ~ "}" -%}
+	{%- else -%}
+		{%- set gqlType = field.contentGqlType -%}
+		{%- set type = gqlType is iterable ? gqlType.type : gqlType -%}
+		{%- if type is instance of('GraphQL\\Type\\Definition\\WrappingType') -%}
+			{%- set type = type.getWrappedType(true) -%}
+		{%- endif -%}
+		{%- if type is instance of('GraphQL\\Type\\Definition\\UnionType') -%}
+			{%- set sub = '{ __typename }' -%}
+		{%- elseif type is instance of('GraphQL\\Type\\Definition\\ObjectType') or type is instance of('GraphQL\\Type\\Definition\\InterfaceType') -%}
+			{%- set leaves = [] -%}
+			{%- for name, def in type.getFields() -%}
+				{%- set defType = def.getType() -%}
+				{%- if defType is instance of('GraphQL\\Type\\Definition\\WrappingType') -%}
+					{%- set defType = defType.getWrappedType(true) -%}
+				{%- endif -%}
+				{%- if defType is instance of('GraphQL\\Type\\Definition\\LeafType') -%}
+					{%- set leaves = leaves|merge([name]) -%}
+				{%- endif -%}
+			{%- endfor -%}
+			{%- set preferred = ['id', 'title', 'typeHandle', 'html', 'url', 'label', 'fullName']|filter(n => n in leaves) -%}
+			{%- set sub = '{ ' ~ (preferred ?: leaves ?: ['__typename'])|join(' ') ~ ' }' -%}
+		{%- endif -%}
+	{%- endif -%}
+	{%- set lines = lines|merge([field.handle ~ (sub ? ' ' ~ sub)]) -%}
+{%- endfor -%}
+{{- lines|join("\n" ~ indent) -}}
