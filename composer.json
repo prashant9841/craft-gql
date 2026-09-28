@@ -1,5 +1,5 @@
 {
-	"name": "prashant/craft-gqldocs",
+	"name": "prashant9841/craft-gqldocs",
 	"description": "GraphQL operations and field schema for any entry: a CP page plus /gqlraw/<entryId>[/fields].",
 	"type": "craft-plugin",
 	"version": "1.0.0",
